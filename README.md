@@ -98,49 +98,49 @@ git clone https://github.com/2741913295/minimax-h3-comfyui.git
 
 | 功能 | 文件 | ComfyUI 目录 | 本地模型目录 |
 |---|---|---|---|
-| 首帧、尾帧、首尾帧 | `minimax_h3_fl2va_pruned_int8_convrot.safetensors` | `models/diffusion_models/` | `/data/xiawei/models/MiniMax-H3/diffusion_models/` |
-| 多参考、视频扩展 | `minimax_h3_ref2va_pruned_int8_convrot.safetensors` | `models/diffusion_models/` | `/data/xiawei/models/MiniMax-H3/diffusion_models/` |
-| 文本编码器 | `qwen3vl_32b_minimax_h3_int8_convrot.safetensors` | `models/text_encoders/` | `/data/xiawei/models/MiniMax-H3/text_encoders/` |
-| 视频 VAE | `minimax_h3_video_vae_fp16.safetensors` | `models/vae/` | `/data/xiawei/models/MiniMax-H3/vae/` |
-| 音频 VAE | `minimax_h3_audio_vae_fp32.safetensors` | `models/vae/` | `/data/xiawei/models/MiniMax-H3/vae/` |
-| FL2VA PDD | `MiniMax-H3-FL2VA-Acc-8Step.safetensors` | `models/pdd_acc/` | `/data/xiawei/models/MiniMax-H3-PDD/` |
-| Ref2VA PDD | `MiniMax-H3-Ref2VA-Acc-8Step.safetensors` | `models/pdd_acc/` | `/data/xiawei/models/MiniMax-H3-PDD/` |
-| 视频扩展 | `minimax_h3_fun_controlnet_union_2.0_pruned_int8_convrot.safetensors` | `models/model_patches/` | `/data/xiawei/models/MiniMax-H3/model_patches/` |
+| 首帧、尾帧、首尾帧 | `minimax_h3_fl2va_pruned_int8_convrot.safetensors` | `models/diffusion_models/` | `/path/to/MiniMax-H3/diffusion_models/` |
+| 多参考、视频扩展 | `minimax_h3_ref2va_pruned_int8_convrot.safetensors` | `models/diffusion_models/` | `/path/to/MiniMax-H3/diffusion_models/` |
+| 文本编码器 | `qwen3vl_32b_minimax_h3_int8_convrot.safetensors` | `models/text_encoders/` | `/path/to/MiniMax-H3/text_encoders/` |
+| 视频 VAE | `minimax_h3_video_vae_fp16.safetensors` | `models/vae/` | `/path/to/MiniMax-H3/vae/` |
+| 音频 VAE | `minimax_h3_audio_vae_fp32.safetensors` | `models/vae/` | `/path/to/MiniMax-H3/vae/` |
+| FL2VA PDD | `MiniMax-H3-FL2VA-Acc-8Step.safetensors` | `models/pdd_acc/` | `/path/to/MiniMax-H3-PDD/` |
+| Ref2VA PDD | `MiniMax-H3-Ref2VA-Acc-8Step.safetensors` | `models/pdd_acc/` | `/path/to/MiniMax-H3-PDD/` |
+| 视频扩展 | `minimax_h3_fun_controlnet_union_2.0_pruned_int8_convrot.safetensors` | `models/model_patches/` | `/path/to/MiniMax-H3/model_patches/` |
 
 ### ModelScope 下载命令
 
 ```bash
 modelscope download --model Comfy-Org/MiniMax-H3 \
   diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors \
-  --local_dir /data/xiawei/models/MiniMax-H3
+  --local_dir /path/to/MiniMax-H3
 
 modelscope download --model Comfy-Org/MiniMax-H3 \
   diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors \
-  --local_dir /data/xiawei/models/MiniMax-H3
+  --local_dir /path/to/MiniMax-H3
 
 modelscope download --model Comfy-Org/MiniMax-H3 \
   text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors \
-  --local_dir /data/xiawei/models/MiniMax-H3
+  --local_dir /path/to/MiniMax-H3
 
 modelscope download --model Comfy-Org/MiniMax-H3 \
   vae/minimax_h3_video_vae_fp16.safetensors \
-  --local_dir /data/xiawei/models/MiniMax-H3
+  --local_dir /path/to/MiniMax-H3
 
 modelscope download --model Comfy-Org/MiniMax-H3 \
   vae/minimax_h3_audio_vae_fp32.safetensors \
-  --local_dir /data/xiawei/models/MiniMax-H3
+  --local_dir /path/to/MiniMax-H3
 
 modelscope download --model PAI/MiniMax-H3-Acc-LoRAs \
   MiniMax-H3-FL2VA-Acc-8Step.safetensors \
-  --local_dir /data/xiawei/models/MiniMax-H3-PDD
+  --local_dir /path/to/MiniMax-H3-PDD
 
 modelscope download --model PAI/MiniMax-H3-Acc-LoRAs \
   MiniMax-H3-Ref2VA-Acc-8Step.safetensors \
-  --local_dir /data/xiawei/models/MiniMax-H3-PDD
+  --local_dir /path/to/MiniMax-H3-PDD
 
 modelscope download --model Comfy-Org/MiniMax-H3 \
   model_patches/minimax_h3_fun_controlnet_union_2.0_pruned_int8_convrot.safetensors \
-  --local_dir /data/xiawei/models/MiniMax-H3
+  --local_dir /path/to/MiniMax-H3
 ```
 
 ### 软链接
@@ -495,8 +495,8 @@ cd /path/to/ComfyUI/custom_nodes/ComfyUI-MiniMax-H3-PDD-Acc
 
 python \
   convert_pdd_acc.py \
-  /data/xiawei/models/MiniMax-H3-PDD/MiniMax-H3-Ref2VA-Acc-8Step.safetensors \
-  /data/xiawei/models/MiniMax-H3-PDD/minimax_h3_ref2va_pdd_acc_8step_comfyui.safetensors
+  /path/to/MiniMax-H3-PDD/MiniMax-H3-Ref2VA-Acc-8Step.safetensors \
+  /path/to/MiniMax-H3-PDD/minimax_h3_ref2va_pdd_acc_8step_comfyui.safetensors
 ```
 
 ## PDD Trunk Bake
@@ -505,13 +505,13 @@ python \
 cd /path/to/ComfyUI/custom_nodes/ComfyUI-MiniMax-H3-PDD-Acc
 
 python bake_pdd_trunk.py --check \
-  --base /data/xiawei/models/MiniMax-H3/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors \
-  --pdd /data/xiawei/models/MiniMax-H3-PDD/MiniMax-H3-Ref2VA-Acc-8Step.safetensors
+  --base /path/to/MiniMax-H3/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors \
+  --pdd /path/to/MiniMax-H3-PDD/MiniMax-H3-Ref2VA-Acc-8Step.safetensors
 
 python bake_pdd_trunk.py \
-  --base /data/xiawei/models/MiniMax-H3/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors \
-  --pdd /data/xiawei/models/MiniMax-H3-PDD/MiniMax-H3-Ref2VA-Acc-8Step.safetensors \
-  --out /data/xiawei/models/MiniMax-H3/diffusion_models/minimax_h3_ref2va_pddbaked_int8_convrot.safetensors
+  --base /path/to/MiniMax-H3/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors \
+  --pdd /path/to/MiniMax-H3-PDD/MiniMax-H3-Ref2VA-Acc-8Step.safetensors \
+  --out /path/to/MiniMax-H3/diffusion_models/minimax_h3_ref2va_pddbaked_int8_convrot.safetensors
 ```
 
 使用 baked UNET 时，在 `MiniMaxH3PDDAccApply` 中设置 `lora_strength=0.0`。
