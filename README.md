@@ -63,7 +63,7 @@ ComfyUI/
 conda create -n comfyui-h3 python=3.11 -y
 conda activate comfyui-h3
 
-cd /data/xiawei/project/ComfyUI
+cd path/minimax-h3-comfyui
 
 python -m pip install torch torchvision \
   --index-url https://download.pytorch.org/whl/cu130
@@ -75,21 +75,21 @@ python -m pip install -r requirements.txt \
 安装 SageAttention：
 
 ```bash
-/data/xiawei/envs/comfyui-h3/bin/python -m pip install sageattention \
+python -m pip install sageattention \
   -i https://mirrors.ustc.edu.cn/pypi/simple
 ```
 
 安装插件：
 
 ```bash
-cd /data/xiawei/project/ComfyUI/custom_nodes
-git clone https://github.com/Jalen-Brunson/ComfyUI-MiniMax-H3-PDD-Acc
+cd /path/to/ComfyUI/custom_nodes
+git clone https://github.com/2741913295/minimax-h3-comfyui.git
 ```
 
 本地项目目录已经存在时无需再次克隆：
 
 ```text
-/data/xiawei/project/ComfyUI/custom_nodes/ComfyUI-MiniMax-H3-PDD-Acc
+/path/to/ComfyUI/custom_nodes/MiniMax-H3-ComfyUI
 ```
 
 ## 模型
@@ -146,33 +146,33 @@ modelscope download --model Comfy-Org/MiniMax-H3 \
 ### 软链接
 
 ```bash
-cd /data/xiawei/project/ComfyUI
+cd /path/to/ComfyUI
 
 mkdir -p models/diffusion_models models/text_encoders models/vae
 mkdir -p models/pdd_acc models/model_patches
 
-ln -sfn /data/xiawei/models/MiniMax-H3/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors \
+ln -sfn /path/to/MiniMax-H3/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors \
   models/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors
 
-ln -sfn /data/xiawei/models/MiniMax-H3/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors \
+ln -sfn /path/to/MiniMax-H3/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors \
   models/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors
 
-ln -sfn /data/xiawei/models/MiniMax-H3/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors \
+ln -sfn /path/to/MiniMax-H3/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors \
   models/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors
 
-ln -sfn /data/xiawei/models/MiniMax-H3/vae/minimax_h3_video_vae_fp16.safetensors \
+ln -sfn /path/to/MiniMax-H3/vae/minimax_h3_video_vae_fp16.safetensors \
   models/vae/minimax_h3_video_vae_fp16.safetensors
 
-ln -sfn /data/xiawei/models/MiniMax-H3/vae/minimax_h3_audio_vae_fp32.safetensors \
+ln -sfn /path/to/MiniMax-H3/vae/minimax_h3_audio_vae_fp32.safetensors \
   models/vae/minimax_h3_audio_vae_fp32.safetensors
 
-ln -sfn /data/xiawei/models/MiniMax-H3-PDD/MiniMax-H3-FL2VA-Acc-8Step.safetensors \
+ln -sfn /path/to/MiniMax-H3-PDD/MiniMax-H3-FL2VA-Acc-8Step.safetensors \
   models/pdd_acc/MiniMax-H3-FL2VA-Acc-8Step.safetensors
 
-ln -sfn /data/xiawei/models/MiniMax-H3-PDD/MiniMax-H3-Ref2VA-Acc-8Step.safetensors \
+ln -sfn /path/to/MiniMax-H3-PDD/MiniMax-H3-Ref2VA-Acc-8Step.safetensors \
   models/pdd_acc/MiniMax-H3-Ref2VA-Acc-8Step.safetensors
 
-ln -sfn /data/xiawei/models/MiniMax-H3/model_patches/minimax_h3_fun_controlnet_union_2.0_pruned_int8_convrot.safetensors \
+ln -sfn /path/to/MiniMax-H3/model_patches/minimax_h3_fun_controlnet_union_2.0_pruned_int8_convrot.safetensors \
   models/model_patches/minimax_h3_fun_controlnet_union_2.0_pruned_int8_convrot.safetensors
 ```
 
@@ -259,16 +259,16 @@ FL2VA 必须搭配 `MiniMax-H3-FL2VA-Acc-8Step.safetensors`；Ref2VA 必须搭�
 GPU 7、端口 8187：
 
 ```bash
-cd /data/xiawei/project/ComfyUI
+cd /path/to/ComfyUI
 
-/data/xiawei/envs/comfyui-h3/bin/python -u main.py \
+python -u main.py \
   --listen 127.0.0.1 \
   --port 8187 \
   --cuda-device 7 \
-  --input-directory /data/xiawei/project/ComfyUI/data \
-  --output-directory /data/xiawei/project/ComfyUI/outputs \
+  --input-directory /path/to/ComfyUI/data \
+  --output-directory /path/to/ComfyUI/outputs \
   --use-sage-attention \
-  --database-url sqlite:////data/xiawei/project/ComfyUI/user_sage.db \
+  --database-url sqlite:////path/to/ComfyUI/user_sage.db \
   2>&1 | tee logs/comfyui_gpu7_sage.log
 ```
 
@@ -279,7 +279,7 @@ cd /data/xiawei/project/ComfyUI
 批处理入口：
 
 ```text
-/data/xiawei/project/ComfyUI/script_examples/minimax_h3_pdd_batch.py
+/path/to/ComfyUI/script_examples/minimax_h3_pdd_batch.py
 ```
 
 通用参数：
@@ -311,9 +311,9 @@ data/H3多参考测试案例/
 运行 `case_qr_08_别墅客厅`，生成 768p 4 秒和 15 秒视频：
 
 ```bash
-cd /data/xiawei/project/ComfyUI
+cd /path/to/ComfyUI
 
-/data/xiawei/envs/comfyui-h3/bin/python -u \
+python -u \
   script_examples/minimax_h3_pdd_batch.py multi-reference \
   --server http://127.0.0.1:8187 \
   --gpu-index 7 \
@@ -341,9 +341,9 @@ data/video-data/
 每个子目录取第一个案例：
 
 ```bash
-cd /data/xiawei/project/ComfyUI
+cd /path/to/ComfyUI
 
-/data/xiawei/envs/comfyui-h3/bin/python -u \
+python -u \
   script_examples/minimax_h3_pdd_batch.py first-frame \
   --server http://127.0.0.1:8187 \
   --gpu-index 7 \
@@ -356,7 +356,7 @@ cd /data/xiawei/project/ComfyUI
 全部案例：
 
 ```bash
-/data/xiawei/envs/comfyui-h3/bin/python -u \
+python -u \
   script_examples/minimax_h3_pdd_batch.py first-frame \
   --server http://127.0.0.1:8187 \
   --gpu-index 7 \
@@ -371,9 +371,9 @@ cd /data/xiawei/project/ComfyUI
 每个类别按 Excel 顺序取前两个案例：
 
 ```bash
-cd /data/xiawei/project/ComfyUI
+cd /path/to/ComfyUI
 
-/data/xiawei/envs/comfyui-h3/bin/python -u \
+python -u \
   script_examples/minimax_h3_pdd_batch.py last-frame \
   --server http://127.0.0.1:8187 \
   --gpu-index 7 \
@@ -388,9 +388,9 @@ cd /data/xiawei/project/ComfyUI
 2D 图片 `1:2`、`2:3`、`7:8` 分别作为首帧和尾帧。提示词使用每组首帧图片在 Excel 中的提示词。
 
 ```bash
-cd /data/xiawei/project/ComfyUI
+cd /path/to/ComfyUI
 
-/data/xiawei/envs/comfyui-h3/bin/python -u \
+python -u \
   script_examples/minimax_h3_pdd_batch.py first-last-frame \
   --server http://127.0.0.1:8187 \
   --gpu-index 7 \
@@ -428,9 +428,9 @@ data/H3多参考测试案例/video/
 运行：
 
 ```bash
-cd /data/xiawei/project/ComfyUI
+cd /path/to/ComfyUI
 
-/data/xiawei/envs/comfyui-h3/bin/python -u \
+python -u \
   script_examples/minimax_h3_pdd_batch.py vertical-video-to-horizontal \
   --server http://127.0.0.1:8187 \
   --gpu-index 7 \
@@ -491,9 +491,9 @@ outputs/
 原始 PDD 文件可转换为 ComfyUI 键名格式：
 
 ```bash
-cd /data/xiawei/project/ComfyUI/custom_nodes/ComfyUI-MiniMax-H3-PDD-Acc
+cd /path/to/ComfyUI/custom_nodes/ComfyUI-MiniMax-H3-PDD-Acc
 
-/data/xiawei/envs/comfyui-h3/bin/python \
+python \
   convert_pdd_acc.py \
   /data/xiawei/models/MiniMax-H3-PDD/MiniMax-H3-Ref2VA-Acc-8Step.safetensors \
   /data/xiawei/models/MiniMax-H3-PDD/minimax_h3_ref2va_pdd_acc_8step_comfyui.safetensors
@@ -502,13 +502,13 @@ cd /data/xiawei/project/ComfyUI/custom_nodes/ComfyUI-MiniMax-H3-PDD-Acc
 ## PDD Trunk Bake
 
 ```bash
-cd /data/xiawei/project/ComfyUI/custom_nodes/ComfyUI-MiniMax-H3-PDD-Acc
+cd /path/to/ComfyUI/custom_nodes/ComfyUI-MiniMax-H3-PDD-Acc
 
-/data/xiawei/envs/comfyui-h3/bin/python bake_pdd_trunk.py --check \
+python bake_pdd_trunk.py --check \
   --base /data/xiawei/models/MiniMax-H3/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors \
   --pdd /data/xiawei/models/MiniMax-H3-PDD/MiniMax-H3-Ref2VA-Acc-8Step.safetensors
 
-/data/xiawei/envs/comfyui-h3/bin/python bake_pdd_trunk.py \
+python bake_pdd_trunk.py \
   --base /data/xiawei/models/MiniMax-H3/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors \
   --pdd /data/xiawei/models/MiniMax-H3-PDD/MiniMax-H3-Ref2VA-Acc-8Step.safetensors \
   --out /data/xiawei/models/MiniMax-H3/diffusion_models/minimax_h3_ref2va_pddbaked_int8_convrot.safetensors
@@ -519,17 +519,17 @@ cd /data/xiawei/project/ComfyUI/custom_nodes/ComfyUI-MiniMax-H3-PDD-Acc
 ## 测试
 
 ```bash
-cd /data/xiawei/project/ComfyUI/custom_nodes/ComfyUI-MiniMax-H3-PDD-Acc
+cd /path/to/ComfyUI/custom_nodes/ComfyUI-MiniMax-H3-PDD-Acc
 
-/data/xiawei/envs/comfyui-h3/bin/python tests/test_pdd_acc.py
+python tests/test_pdd_acc.py
 ```
 
 完整文件验证：
 
 ```bash
-cd /data/xiawei/project/ComfyUI/custom_nodes/ComfyUI-MiniMax-H3-PDD-Acc
+cd /path/to/ComfyUI/custom_nodes/ComfyUI-MiniMax-H3-PDD-Acc
 
-PDD_ACC_SLOW=1 /data/xiawei/envs/comfyui-h3/bin/python tests/test_pdd_acc.py
+PDD_ACC_SLOW=1 python tests/test_pdd_acc.py
 ```
 
 ## License
