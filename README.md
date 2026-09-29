@@ -1,271 +1,538 @@
 # ComfyUI-MiniMax-H3-PDD-Acc
 
-Native ComfyUI support for the **official MiniMax-H3 8-step PDD acceleration LoRAs**
-([alibaba-pai/MiniMax-H3-Acc-LoRAs](https://huggingface.co/alibaba-pai/MiniMax-H3-Acc-LoRAs)) —
-full audio+video generation in **8 (or 4) sampler steps**, no CFG.
+MiniMax H3 的 ComfyUI 本地推理扩展，包含 PDD Acc 加速节点、MiniMax H3 批处理工具，以及多参考、首帧、尾帧、首尾帧和竖屏转横屏视频扩展工作流。
 
-These files are *not* ordinary LoRAs: alongside a rank-64 trunk LoRA they carry a
-**Parallel Decoding Distillation head bank** — 32 per-interval copies of the final-layer
-video/audio projections that get fused into one mean-block-velocity head per sampler step
-([PDD, Shaul et al. 2026](https://arxiv.org/abs/2607.26004)). A plain LoRA loader can't read
-them, and dropping the head bank silently loses the distill. This pack loads the whole thing.
+- PDD Acc：为 FL2VA / Ref2VA 应用官方 8 Step PDD Acc 权重。
+- 多参考生视频：图片、视频、音频可组合输入。
+- 首帧、尾帧、首尾帧生视频：读取本地 Excel 提示词并批量生成。
+- 竖屏转横屏：MiniMax H3 Fun ControlNet 2.0 的视频 Inpainting / Outpainting 流程。
+- SageAttention：批处理任务默认要求 ComfyUI 使用 `--use-sage-attention` 启动。
+- 指标记录：每个输出视频旁保存 `*_metrics.json`，记录推理时间、峰值显存和 H3 分阶段性能数据。
 
-## Install
+## 目录结构
+
+```text
+ComfyUI/
+├── custom_nodes/
+│   └── ComfyUI-MiniMax-H3-PDD-Acc/
+│       ├── nodes.py
+│       ├── pdd_acc_core.py
+│       ├── example_workflows/
+│       ├── tests/
+│       ├── convert_pdd_acc.py
+│       ├── bake_pdd_trunk.py
+│       └── README.md
+├── script_examples/
+│   ├── minimax_h3_pdd_batch.py
+│   └── minimax_h3_fun_outpaint.py
+├── data/
+│   ├── video-data/
+│   │   ├── 2d/
+│   │   ├── 3d/
+│   │   ├── live_shot/
+│   │   └── 对应提示词.xlsx
+│   └── H3多参考测试案例/
+│       ├── case_qr_08_别墅客厅/
+│       ├── case_dd_01_红雨降临/
+│       ├── case_qr_07_徐家老宅继位/
+│       └── video/
+├── models/
+│   ├── diffusion_models/
+│   ├── text_encoders/
+│   ├── vae/
+│   ├── pdd_acc/
+│   └── model_patches/
+└── outputs/
+```
+
+## 环境
+
+推荐环境：
+
+| 项目 | 版本 |
+|---|---|
+| Python | 3.11 |
+| PyTorch | CUDA 13.0 版本 |
+| CUDA 驱动 | 支持 CUDA 13.0 |
+| GPU | 48 GB 显存或更高 |
+| ComfyUI | 0.37.0 或更新版本 |
+
+创建环境并安装 ComfyUI 依赖：
 
 ```bash
-cd ComfyUI/custom_nodes
+conda create -n comfyui-h3 python=3.11 -y
+conda activate comfyui-h3
+
+cd /data/xiawei/project/ComfyUI
+
+python -m pip install torch torchvision \
+  --index-url https://download.pytorch.org/whl/cu130
+
+python -m pip install -r requirements.txt \
+  -i https://mirrors.ustc.edu.cn/pypi/simple
+```
+
+安装 SageAttention：
+
+```bash
+/data/xiawei/envs/comfyui-h3/bin/python -m pip install sageattention \
+  -i https://mirrors.ustc.edu.cn/pypi/simple
+```
+
+安装插件：
+
+```bash
+cd /data/xiawei/project/ComfyUI/custom_nodes
 git clone https://github.com/Jalen-Brunson/ComfyUI-MiniMax-H3-PDD-Acc
 ```
 
-Put the PDD file(s) in `ComfyUI/models/pdd_acc/` (the folder is created on first launch).
-Either release works — the loader auto-detects the format:
+本地项目目录已经存在时无需再次克隆：
 
-| Source | Files |
+```text
+/data/xiawei/project/ComfyUI/custom_nodes/ComfyUI-MiniMax-H3-PDD-Acc
+```
+
+## 模型
+
+### 必需模型
+
+| 功能 | 文件 | ComfyUI 目录 | 本地模型目录 |
+|---|---|---|---|
+| 首帧、尾帧、首尾帧 | `minimax_h3_fl2va_pruned_int8_convrot.safetensors` | `models/diffusion_models/` | `/data/xiawei/models/MiniMax-H3/diffusion_models/` |
+| 多参考、视频扩展 | `minimax_h3_ref2va_pruned_int8_convrot.safetensors` | `models/diffusion_models/` | `/data/xiawei/models/MiniMax-H3/diffusion_models/` |
+| 文本编码器 | `qwen3vl_32b_minimax_h3_int8_convrot.safetensors` | `models/text_encoders/` | `/data/xiawei/models/MiniMax-H3/text_encoders/` |
+| 视频 VAE | `minimax_h3_video_vae_fp16.safetensors` | `models/vae/` | `/data/xiawei/models/MiniMax-H3/vae/` |
+| 音频 VAE | `minimax_h3_audio_vae_fp32.safetensors` | `models/vae/` | `/data/xiawei/models/MiniMax-H3/vae/` |
+| FL2VA PDD | `MiniMax-H3-FL2VA-Acc-8Step.safetensors` | `models/pdd_acc/` | `/data/xiawei/models/MiniMax-H3-PDD/` |
+| Ref2VA PDD | `MiniMax-H3-Ref2VA-Acc-8Step.safetensors` | `models/pdd_acc/` | `/data/xiawei/models/MiniMax-H3-PDD/` |
+| 视频扩展 | `minimax_h3_fun_controlnet_union_2.0_pruned_int8_convrot.safetensors` | `models/model_patches/` | `/data/xiawei/models/MiniMax-H3/model_patches/` |
+
+### ModelScope 下载命令
+
+```bash
+modelscope download --model Comfy-Org/MiniMax-H3 \
+  diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors \
+  --local_dir /data/xiawei/models/MiniMax-H3
+
+modelscope download --model Comfy-Org/MiniMax-H3 \
+  diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors \
+  --local_dir /data/xiawei/models/MiniMax-H3
+
+modelscope download --model Comfy-Org/MiniMax-H3 \
+  text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors \
+  --local_dir /data/xiawei/models/MiniMax-H3
+
+modelscope download --model Comfy-Org/MiniMax-H3 \
+  vae/minimax_h3_video_vae_fp16.safetensors \
+  --local_dir /data/xiawei/models/MiniMax-H3
+
+modelscope download --model Comfy-Org/MiniMax-H3 \
+  vae/minimax_h3_audio_vae_fp32.safetensors \
+  --local_dir /data/xiawei/models/MiniMax-H3
+
+modelscope download --model PAI/MiniMax-H3-Acc-LoRAs \
+  MiniMax-H3-FL2VA-Acc-8Step.safetensors \
+  --local_dir /data/xiawei/models/MiniMax-H3-PDD
+
+modelscope download --model PAI/MiniMax-H3-Acc-LoRAs \
+  MiniMax-H3-Ref2VA-Acc-8Step.safetensors \
+  --local_dir /data/xiawei/models/MiniMax-H3-PDD
+
+modelscope download --model Comfy-Org/MiniMax-H3 \
+  model_patches/minimax_h3_fun_controlnet_union_2.0_pruned_int8_convrot.safetensors \
+  --local_dir /data/xiawei/models/MiniMax-H3
+```
+
+### 软链接
+
+```bash
+cd /data/xiawei/project/ComfyUI
+
+mkdir -p models/diffusion_models models/text_encoders models/vae
+mkdir -p models/pdd_acc models/model_patches
+
+ln -sfn /data/xiawei/models/MiniMax-H3/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors \
+  models/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors
+
+ln -sfn /data/xiawei/models/MiniMax-H3/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors \
+  models/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors
+
+ln -sfn /data/xiawei/models/MiniMax-H3/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors \
+  models/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors
+
+ln -sfn /data/xiawei/models/MiniMax-H3/vae/minimax_h3_video_vae_fp16.safetensors \
+  models/vae/minimax_h3_video_vae_fp16.safetensors
+
+ln -sfn /data/xiawei/models/MiniMax-H3/vae/minimax_h3_audio_vae_fp32.safetensors \
+  models/vae/minimax_h3_audio_vae_fp32.safetensors
+
+ln -sfn /data/xiawei/models/MiniMax-H3-PDD/MiniMax-H3-FL2VA-Acc-8Step.safetensors \
+  models/pdd_acc/MiniMax-H3-FL2VA-Acc-8Step.safetensors
+
+ln -sfn /data/xiawei/models/MiniMax-H3-PDD/MiniMax-H3-Ref2VA-Acc-8Step.safetensors \
+  models/pdd_acc/MiniMax-H3-Ref2VA-Acc-8Step.safetensors
+
+ln -sfn /data/xiawei/models/MiniMax-H3/model_patches/minimax_h3_fun_controlnet_union_2.0_pruned_int8_convrot.safetensors \
+  models/model_patches/minimax_h3_fun_controlnet_union_2.0_pruned_int8_convrot.safetensors
+```
+
+## 节点
+
+### MiniMax H3 PDD Acc LoRA (Apply)
+
+节点名：`MiniMaxH3PDDAccApply`
+
+输入：
+
+| 输入 | 说明 |
 |---|---|
-| Original (alibaba-pai) | [MiniMax-H3-Acc-LoRAs](https://huggingface.co/alibaba-pai/MiniMax-H3-Acc-LoRAs): `MiniMax-H3-FL2VA-Acc-8Step.safetensors`, `MiniMax-H3-Ref2VA-Acc-8Step.safetensors` |
-| Pre-converted ComfyUI keys | [aptech0081/MiniMax-H3-Acc-LoRAs-ComfyUI](https://huggingface.co/aptech0081/MiniMax-H3-Acc-LoRAs-ComfyUI): `minimax_h3_fl2va_pdd_acc_8step_comfyui.safetensors`, `minimax_h3_ref2va_pdd_acc_8step_comfyui.safetensors` |
+| `model` | MiniMax H3 UNET |
+| `pdd_file` | `models/pdd_acc/` 中的 PDD Acc 文件 |
+| `nfe` | PDD 推理步数，支持 `8`、`6`、`4` |
+| `lora_strength` | Trunk LoRA 强度，默认 `1.0` |
+| `head_strength` | PDD Head 强度，默认 `1.0` |
+| `on_off_grid` | 非训练采样网格处理方式，默认 `error` |
+| `partition` | 自定义 PDD 分块，例如 `8,8,4,4,4,4` |
+| `enabled` | 是否启用 PDD |
+| `bypass_sigmas` | `enabled=false` 时使用的基础模型采样计划 |
+| `partition_check` | FL2VA / Ref2VA 主干匹配检查 |
 
-Pair **FL2VA** with an fl2va UNET and **Ref2VA** with a ref2va UNET (bf16 originals or int8
-convrot builds both work — LoRA application goes through ComfyUI's quant-aware patch path).
+输出：
 
-**ComfyUI version:** v0.33.0 or newer (the MiniMax-H3 carried-audio mechanics,
-comfyanonymous/ComfyUI#15243 — the node fails closed with an update message on older cores).
-Both pre- and post-#15375 cores work; the final-layer patch delegates to your core's own
-forward rather than replicating its internals.
+| 输出 | 说明 |
+|---|---|
+| `MODEL` | 已应用 PDD Acc 的模型 |
+| `SIGMAS` | 与 PDD 分块匹配的采样 sigma |
+| `info` | 模型主干、LoRA 模块、分块和检查结果 |
 
-## Nodes
+PDD 设置：
 
-### MiniMax H3 PDD Acc LoRA (Apply) — `MiniMaxH3PDDAccApply`
-`MODEL → MODEL + SIGMAS + info`. One node does everything: applies the trunk LoRA
-(converting diffusers keys to ComfyUI naming in memory when given an original-format file)
-and installs the PDD head bank on `final_layer`, armed per step **by sigma** — so looping /
-chunked samplers, resumes and split schedules can't desync it.
+| 目标步数 | 分块 |
+|---|---|
+| 8 | `4,4,4,4,4,4,4,4` |
+| 6 | `8,8,4,4,4,4` |
+| 4 | `8,8,8,8` |
 
-- **nfe** — model evaluations. `8` = trained block size (default). `4` regroups two blocks
-  per step (officially sanctioned — the release demos both). `6` uses the non-uniform default
-  partition `8,8,4,4,4,4` (the two merged size-8 blocks sit at high sigma where the block
-  boundaries span almost no sigma, and the late heavyweight blocks stay at trained size —
-  every knot stays on the trained fine grid).
-- **partition** (optional) — custom block sizes in fine steps, comma-separated, summing to 32
-  (e.g. `8,4,4,4,4,4,4` for 7 steps). Overrides `nfe`; the sigmas output follows.
-- **Only block sizes 4 and 8 are legal** — the training envelope. PDD heads are conditioned on
-  trunk features from block *starts* on the L_min=4 grid with blocks of 4 or 8 fine steps;
-  evaluating the trunk anywhere else feeds the heads features they never trained on and renders
-  as heavy noise (community-reported at 32 steps on FL2VA, reproduced locally on plain SDPA —
-  it is not an attention-backend issue). The node therefore rejects off-envelope step counts
-  and partitions instead of letting them degrade. More steps than 8 is not "closer to the
-  teacher" here: the per-interval heads are only ever decoded from envelope block starts.
-- **lora_strength / head_strength** — trained at 1.0 / 1.0.
-- **on_off_grid** — `error` (default): refuse evaluation at sigmas that are not trained block
-  boundaries, with a message telling you what to fix. `clamp`: nearest block, degraded output.
-- **enabled** (optional, default true) — `false` = full bypass: the input model and
-  `bypass_sigmas` pass through untouched (nothing is loaded or patched). Wire a boolean node
-  here to A/B the distill or drive a subgraph toggle.
-- **bypass_sigmas** (optional SIGMAS) — returned as the sigmas output when `enabled=false`
-  (wire the schedule for the un-distilled model, e.g. a BasicScheduler). The node errors if
-  you disable it without wiring this — the PDD block boundaries would be a wrong schedule for
-  an unpatched model. Remember the rest of the un-distilled recipe (CFG, sampler, steps)
-  differs too.
+PDD 工作流必须使用：
 
-### MiniMax H3 PDD Acc Scheduler — `MiniMaxH3PDDAccScheduler`
-Standalone SIGMAS emitter for partial-denoise / split-sigma workflows. At `denoise 1.0` it
-equals the Apply node's sigmas output.
+| 项目 | 值 |
+|---|---|
+| 采样器 | `euler` |
+| 指导 | `CFG 1.0` / `BasicGuider` |
+| 视频 Sigma Shift | `12.0` |
+| 音频 Sigma Shift | `3.0` |
+| SIGMAS | PDD Apply 节点或 PDD Scheduler 节点输出 |
 
-## Required recipe
+FL2VA 必须搭配 `MiniMax-H3-FL2VA-Acc-8Step.safetensors`；Ref2VA 必须搭配 `MiniMax-H3-Ref2VA-Acc-8Step.safetensors`。
 
-| Setting | Value | Why |
-|---|---|---|
-| Sampler | **euler** (KSamplerSelect) | each step consumes one mean block velocity; multi-stage samplers (er_sde, dpmpp, res_*) evaluate off-grid |
-| Sigmas | the Apply node's **sigmas output** → SamplerCustomAdvanced | trained boundaries `12t/(1+11t)`, `t = linspace(1,0,nfe+1)` |
-| Guidance | **CFG 1.0** (BasicGuider) | guidance is distilled in; single forward per step |
-| SigmaShift | **12.0 / 3.0** exactly | the training grid; the node fails closed otherwise |
+### MiniMax H3 PDD Acc Scheduler
 
-**Remove** other distill LoRAs (lightx2v turbo etc.) — distills don't stack. Character LoRAs
-stack normally. **Do not stack** step-caching packs (blockcache / EasyCache — the final-layer
-patch fails closed, and an 8-step distill has nothing to cache anyway).
+节点名：`MiniMaxH3PDDAccScheduler`
 
-## Trunk pairing guard (partition fingerprint)
+用于部分去噪、两阶段采样和自定义工作流。输入 `nfe`、`denoise`、`partition`，输出符合 PDD 训练网格的 `SIGMAS`。
 
-The FL2VA and Ref2VA trunks ship **identical tensor key sets**, so pairing an FL2VA distill
-with a ref2va UNET (or vice versa) applies cleanly and renders **silently wrong**. The Apply
-node now identifies the loaded model's trunk from its `final_layer.video_out.weight` — that
-tensor is fp32-unquantized in every published build, bit-identical across the
-int8_convrot/pruned/rebased variants of one trunk, and the two trunks sit 0.0503 apart in
-relative Frobenius distance (fingerprints shipped fp16 in `partition_fingerprints/`,
-tolerance 0.015 ≫ cast/storage noise ~2e-3). A confident mismatch **errors**; set the
-optional `partition_check` input to `warn` for deliberate cross-trunk experiments, or to
-`off` to disable the model-type analysis entirely — the fingerprint check never runs and
-mispairings apply unchecked (the info output notes it). A
-finetune or full-merge that matches neither fingerprint just logs "inconclusive" and
-proceeds — the guard never blocks checkpoints it has no fingerprint for. New trunks:
-`python3 bake_partition_fingerprint.py <checkpoint> <name>`.
+### MiniMax H3 PDD Acc Warmup Scheduler (2-phase)
 
-Guard design after [fblissjr/ComfyUI-h3-explorations](https://github.com/fblissjr/ComfyUI-h3-explorations),
-which shipped a partition fingerprint first.
+节点名：`MiniMaxH3PDDAccWarmupScheduler`
 
-## Pruned checkpoints
+第一阶段运行基础模型，第二阶段运行 PDD 模型。适用于人物一致性、结构稳定性或参考图约束较强的任务。
 
-Pruned H3 UNETs (Comfy-Org `*_pruned_*`, the GGUF/w4a8/nvfp4 re-quants of them) replace the
-dense adaln with a shared 8-dim curve table — a dense adaln LoRA can't patch them, which is
-why plain loaders spam ~50 `ERROR lora ... adaln_proj` lines and silently drop that part of
-the distill. This pack handles it: on a pruned model the 50 adaln LoRA modules are
-**rebased onto the model's curve basis** (weight diff `B(AV)` + the mandatory DC bias diff
-`B(Ac)`, from the affine fit `silu(t_emb(t)) ≈ c + V·table(t)` solved in float64 against a
-matching full checkpoint — fit residual ~1.4e-5, effectively exact). The node matches the
-model's adaln table against the two shipped bases in `adaln_basis/` (one per trunk)
-automatically and warns on trunk mismatches.
+### MiniMax H3 AV Latent Upscale By
 
-A repacked or requantized pruned build may carry a table that is **not byte-identical** to
-the Comfy-Org ones but still describes the same trunk's curve. The node handles that too:
-when no exact match is found it **auto-refits** each shipped basis onto the model's table
-(rows of every table sample the same fixed timestep grid, so this is a float64 least-squares
-fit) and accepts the best fit when the residual is same-trunk small (~1e-5; a genuinely
-different finetune lands around 1e-1 and is refused). If your pruned checkpoint is refused,
-it is not a repack of a known trunk — bake a basis with `bake_adaln_basis.py` (see its
-docstring) or open an issue naming the exact checkpoint file/source so a basis can be
-shipped.
+节点名：`MiniMaxH3AVLatentUpscaleBy`
 
-**Hybrid trunks (fl2va+ref2va block merges):** a hybrid carries ONE adaln table — its BASE
-trunk's — so e.g. an fl2va-based `b15-49` hybrid matches the fl2va basis and pairing it with
-the Ref2VA PDD file logs a trunk-mismatch warning. If the hybrid pairing is what you intend,
-the warning is informational: PDD fully applies (the node fails closed if any patch key
-misses, and sampling would error — not silently skip PDD — if the heads were not armed;
-check the `info` output for the applied module count). But hybrids are **off-label for
-PDD**: the trunk LoRA and head bank were trained on the pure trunks, so quality on a merge
-is untested. If output looks weak or wrong, A/B against the matching plain trunk before
-blaming settings.
+对 MiniMax H3 的视频 latent 进行空间放大，音频 latent 保持不变。用于低分辨率先生成，再部分去噪细化到高分辨率。
 
-## Example workflows
+## 示例工作流
 
-- [`example_workflows/pdd_acc_t2v_basic.json`](example_workflows/pdd_acc_t2v_basic.json) —
-  prompt-to-video+audio in 8 steps (Ref2VA trunk, zero references; wire images into
-  `ref_image_0…` for identity-locked r2v). Drag into ComfyUI.
-- [`example_workflows/pdd_acc_t2v_warmup_split.json`](example_workflows/pdd_acc_t2v_warmup_split.json) —
-  two-phase warmup for better reference likeness: the Warmup Scheduler's sigmas are split at
-  its `phase2_start_step` with core `SplitSigmas`; pass 1 samples the un-distilled BASE model
-  over the warmup segment, pass 2 chains its `output` latent (via `DisableNoise`) into the
-  PDD-patched model for the trained tail.
-- [`example_workflows/pdd_acc_t2v_latent_upscale.json`](example_workflows/pdd_acc_t2v_latent_upscale.json) —
-  two-pass latent upscale (hi-res fix): full 8-step PDD render at 896x512, then
-  `MiniMax H3 AV Latent Upscale By` x1.5 (lands exactly on the model-native 1344x768) into a
-  partial-denoise PDD pass — the `PDD Acc Scheduler` with `denoise 0.25` re-runs only the
-  LAST 2 trained blocks (resume sigma 0.8), so the refine stays on the trained grid
-  (0.125 = 1 block/subtle, 0.375 = 3 blocks/strong). Audio is decoded from pass 1 and is
-  untouched by the refine. The upscale node exists because core `LatentUpscale` cannot
-  handle H3's nested video+audio latent; it resizes the video half per frame (audio passes
-  through) and snaps to the model's 2x2 patch grid.
+| 文件 | 功能 |
+|---|---|
+| `example_workflows/pdd_acc_t2v_basic.json` | PDD 8 Step 文生视频和音频 |
+| `example_workflows/pdd_acc_t2v_warmup_split.json` | 基础模型 Warmup + PDD 后段采样 |
+| `example_workflows/pdd_acc_t2v_latent_upscale.json` | 两阶段 latent 放大和细化 |
+| `example_workflows/pdd_video_upscale_long.json` | 长视频分窗 latent 放大 |
 
-- [`example_workflows/pdd_video_upscale_long.json`](example_workflows/pdd_video_upscale_long.json) —
-  **upscale an EXISTING video of any length** (video-to-video hi-res fix): load by path,
-  VAE-encode, neural latent upscale to 1344x768, then a PDD partial-denoise refine
-  (`denoise 0.25` = last 2 trained blocks) sampled in 73-frame windows with 22-frame
-  overlap and anchor frames — so a 70s clip refines in ~25 cheap windows instead of one
-  quadratic-cost 500k-token pass. The source audio is muxed straight through untouched.
-  The neural upscaler and the windowed refine sampler (`MinimaxH3LatentUpscaler3D`,
-  `MMH3SplitUpscale`, `MMH3TemporalSplitParams`) are by **LBH-123-AI** — install their
-  [Comfyui_Minimax_h3_latent_Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler)
-  node pack and download the
-  [upscaler model](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler) into
-  `models/latent_upscale_models/`. Also needs
-  [VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite) for the video load.
-  Using the mamad-converted PDD file instead: set nfe 4 on BOTH the Apply node and the Scheduler.
+在 ComfyUI 页面直接拖入 JSON 文件即可加载工作流。
 
-## Converter (optional)
+## 启动 ComfyUI
 
-`convert_pdd_acc.py` produces the pre-converted redistribution format from an original file —
-standalone, no ComfyUI required:
+GPU 7、端口 8187：
 
 ```bash
-python3 convert_pdd_acc.py MiniMax-H3-FL2VA-Acc-8Step.safetensors \
-    minimax_h3_fl2va_pdd_acc_8step_comfyui.safetensors
+cd /data/xiawei/project/ComfyUI
+
+/data/xiawei/envs/comfyui-h3/bin/python -u main.py \
+  --listen 127.0.0.1 \
+  --port 8187 \
+  --cuda-device 7 \
+  --input-directory /data/xiawei/project/ComfyUI/data \
+  --output-directory /data/xiawei/project/ComfyUI/outputs \
+  --use-sage-attention \
+  --database-url sqlite:////data/xiawei/project/ComfyUI/user_sage.db \
+  2>&1 | tee logs/comfyui_gpu7_sage.log
 ```
 
-Output is bit-identical to what the loader computes in memory (tested), with the trunk LoRA
-in standard `diffusion_model.*.lora_A/B.weight` + `.alpha` keys and full provenance metadata.
+`--cuda-device 7` 后，ComfyUI 内部显示为 `cuda:0` 属于正常现象：进程只看得到物理 7 号卡。
 
-## Baking the trunk (optional — for cards where the model doesn't fully fit)
+## 批处理工具
 
-ComfyUI merges LoRA patches into weights **once at load** — but only for modules that fit
-in VRAM. Offloaded modules get a per-forward patch instead: the LoRA (plus a dequantize) is
-re-applied on **every step**. On a card at the VRAM edge that fixed per-step cost is large
-at low resolutions (issue #4 measured ~2× s/it at 864×480 on a 32GB RTX 5090) and vanishes
-into attention time at high ones. **If your model fully loads, baking buys you nothing** —
-the runtime path already costs zero per step there.
+批处理入口：
 
-Measured 2026-08-30 (H200, ref2va int8_convrot, 832×480×124f, 8 steps, SDPA; offload forced
-with `--reserve-vram 120` so the whole 32.4GB trunk streams — the log's `lowvram patches`
-count is the mechanism made visible):
+```text
+/data/xiawei/project/ComfyUI/script_examples/minimax_h3_pdd_batch.py
+```
 
-| regime | runtime patches | baked trunk |
-|---|---|---|
-| fully offloaded | 2.44 s/it (`lowvram patches: 258`) | **2.06 s/it** (`lowvram patches: 0`) |
-| fully loaded | 1.82 s/it | 1.75 s/it (same within noise) |
+通用参数：
 
-The bake removes the per-forward patch term entirely; what remains in the offloaded row is
-pure weight streaming, which both arms pay equally. The patch term is hardware-dependent —
-~0.4 s/step on an H200, ~2.5 s/step in the issue-#4 5090 report — so the win grows as the
-card gets smaller, which is exactly who this is for.
+| 参数 | 说明 |
+|---|---|
+| `--server` | ComfyUI 服务地址 |
+| `--gpu-index` | 用于 `nvidia-smi` 监控的物理 GPU 编号 |
+| `--durations` | `4 15`，生成 4 秒和 15 秒 |
+| `--output-variant` | 输出子目录名称 |
+| `--force` | 已存在同名输出时重新生成 |
+| `--ref-video-vae-scale` | 多参考视频在 VAE 编码前的缩放比例，范围 `0.25-1.0` |
+| `--no-warmup` | 跳过模型热身 |
+| `--allow-sdpa` | 允许未启用 SageAttention 的对照运行 |
 
-`bake_pdd_trunk.py` merges the trunk LoRA (and the adaln update — curve-rebased first on
-pruned bases) into the quantized checkpoint offline, using the same `comfy-kitchen` kernels
-ComfyUI dequantizes with. Only the head bank stays runtime — it swaps `final_layer` per
-fine-interval and cannot be baked. The write is streaming (peak RAM is one module, not one
-checkpoint) and every tensor keeps its exact dtype, shape and byte length:
+批处理默认检查 ComfyUI 是否由 `--use-sage-attention` 启动。未启用 SageAttention 时，添加 `--allow-sdpa` 才能运行。
+
+### 多参考生视频
+
+输入目录：
+
+```text
+data/H3多参考测试案例/
+├── case_qr_08_别墅客厅/
+├── case_dd_01_红雨降临/
+└── case_qr_07_徐家老宅继位/
+```
+
+运行 `case_qr_08_别墅客厅`，生成 768p 4 秒和 15 秒视频：
 
 ```bash
-# audit first (no write): requant error per sampled module
-python3 bake_pdd_trunk.py --check \
-    --base minimax_h3_ref2va_int8_convrot.safetensors \
-    --pdd  MiniMax-H3-Ref2VA-Acc-8Step.safetensors
+cd /data/xiawei/project/ComfyUI
 
-python3 bake_pdd_trunk.py \
-    --base minimax_h3_ref2va_int8_convrot.safetensors \
-    --pdd  MiniMax-H3-Ref2VA-Acc-8Step.safetensors \
-    --out  minimax_h3_ref2va_pddbaked_int8_convrot.safetensors
+/data/xiawei/envs/comfyui-h3/bin/python -u \
+  script_examples/minimax_h3_pdd_batch.py multi-reference \
+  --server http://127.0.0.1:8187 \
+  --gpu-index 7 \
+  --cases case_qr_08_别墅客厅 \
+  --durations 4 15 \
+  --ref-video-vae-scale 0.5 \
+  --output-variant sage \
+  2>&1 | tee logs/multi_reference_gpu7_sage.log
 ```
 
-Load the baked file with a normal UNETLoader and set the Apply node's **`lora_strength`
-to `0.0`** (baked-trunk mode: trunk patching skipped, heads/sigmas/guards unchanged; the
-info output says so). Caveats: the strength is frozen into the file (re-bake to change
-it); on an **unbaked** trunk, strength 0.0 renders the un-distilled model with PDD heads —
-nothing can detect that, so check your file's `pdd_acc_baked` metadata if unsure. GGUF and
-non-convrot formats are refused, not guessed. Requantizing the merged weight costs the
-same class of error the runtime merge pays (it also requantizes); the `--check` audit
-prints the measured number for your files.
+`--ref-video-vae-scale 0.5` 仅缩小多参考输入视频的 VAE 编码尺寸，文本编码器仍使用原始视频信息。设置为 `1.0` 时关闭视频编码缩放。
 
-## How it works (short version)
+### 首帧生视频
 
-- **LoRA conversion** (verified against both codebases' sources): `to_q/to_k/to_v` fuse into
-  ComfyUI's `attn.qkv_proj` (concatenated `lora_A`, block-diagonal `lora_B`, alpha ×3);
-  `ff.net.0.proj → mlp.fc1` with the SwiGLU `[value;gate] → [gate;value]` half-swap;
-  `to_out.0 → attn.out_proj`, `ff.net.2 → mlp.fc2`, `adaln_proj.linear` 1:1 (layouts are
-  bit-identical); `token_refiner.refiner_blocks → token_refiner.blocks`.
-- **Head bank**: per-block plans (fine step sizes normalized per modality on the shift-12
-  video / shift-3 audio grids) fuse the 32 heads into `nfe` fused fp32 heads at load —
-  identical math to the reference `minimax_h3_pdd.py` einsum. A `DIFFUSION_MODEL` wrapper
-  stashes the current sigma; an object patch on `final_layer.forward` selects the block and
-  runs the fused projections (everything else in the layer is untouched).
-- **Audio needs no extra conversion** on current ComfyUI core: the model's carried-audio
-  mapping integrates a *mean* block velocity exactly over finite Euler steps
-  (`s·Δσ_v/(c_i·c_j) = Δσ_a` is an algebraic identity since `c` is linear in σ — unit-tested).
+输入目录和提示词：
 
-## Tests
+```text
+data/video-data/
+├── 2d/
+├── 3d/
+├── live_shot/
+└── 对应提示词.xlsx
+```
+
+每个子目录取第一个案例：
 
 ```bash
-python3 tests/test_pdd_acc.py          # torch-only, no ComfyUI needed
-PDD_ACC_SLOW=1 python3 tests/test_pdd_acc.py   # + full-tensor checks on the real files
+cd /data/xiawei/project/ComfyUI
+
+/data/xiawei/envs/comfyui-h3/bin/python -u \
+  script_examples/minimax_h3_pdd_batch.py first-frame \
+  --server http://127.0.0.1:8187 \
+  --gpu-index 7 \
+  --per-category 1 \
+  --durations 4 15 \
+  --output-variant sage \
+  2>&1 | tee logs/first_frame_gpu7_sage.log
 ```
 
-13 tests: grid/plan/fusion vs the verbatim reference implementation shipped in the official
-repo, boundary sigmas vs diffusers `set_timesteps`, qkv block-diag + SwiGLU swap numerics,
-the carried-audio exactness identity, dual-format round-trip, and structural checks against
-the real safetensors headers.
+全部案例：
 
-## Credits & license
+```bash
+/data/xiawei/envs/comfyui-h3/bin/python -u \
+  script_examples/minimax_h3_pdd_batch.py first-frame \
+  --server http://127.0.0.1:8187 \
+  --gpu-index 7 \
+  --per-category 0 \
+  --durations 4 15 \
+  --output-variant sage \
+  2>&1 | tee logs/first_frame_all_gpu7_sage.log
+```
 
-- Acceleration LoRAs: [alibaba-pai](https://huggingface.co/alibaba-pai) (Apache-2.0);
-  `tests/reference_minimax_h3_pdd.py` is their reference loader, kept verbatim as test oracle.
-- Method: [Parallel Decoding Distillation](https://arxiv.org/abs/2607.26004), Shaul et al.
-- Base model: [MiniMaxAI/MiniMax-H3](https://huggingface.co/MiniMaxAI/MiniMax-H3).
+### 尾帧生视频
 
-This pack: Apache-2.0.
+每个类别按 Excel 顺序取前两个案例：
+
+```bash
+cd /data/xiawei/project/ComfyUI
+
+/data/xiawei/envs/comfyui-h3/bin/python -u \
+  script_examples/minimax_h3_pdd_batch.py last-frame \
+  --server http://127.0.0.1:8187 \
+  --gpu-index 7 \
+  --per-category 2 \
+  --durations 4 15 \
+  --output-variant sage \
+  2>&1 | tee logs/last_frame_gpu7_sage.log
+```
+
+### 首尾帧生视频
+
+2D 图片 `1:2`、`2:3`、`7:8` 分别作为首帧和尾帧。提示词使用每组首帧图片在 Excel 中的提示词。
+
+```bash
+cd /data/xiawei/project/ComfyUI
+
+/data/xiawei/envs/comfyui-h3/bin/python -u \
+  script_examples/minimax_h3_pdd_batch.py first-last-frame \
+  --server http://127.0.0.1:8187 \
+  --gpu-index 7 \
+  --pairs 1:2 2:3 7:8 \
+  --durations 4 15 \
+  --output-variant sage \
+  2>&1 | tee logs/first_last_frame_gpu7_sage.log
+```
+
+### 竖屏转横屏视频扩展
+
+输入目录：
+
+```text
+data/H3多参考测试案例/video/
+├── video_1.mp4
+├── video_2.mp4
+└── text.txt
+```
+
+视频扩展使用 MiniMax H3 Ref2VA、Fun ControlNet Union 2.0 和 H3 原生 latent noise mask。
+
+处理流程：
+
+```text
+竖屏视频
+  → 等比例缩放到目标高度
+  → 1344x768 黑色画布中央放置原视频
+  → 左右区域 mask=1，中间区域 mask=0
+  → Fun ControlNet Inpainting / Outpainting
+  → 生成左右场景细节
+  → 还原中央源视频和原始音频
+```
+
+运行：
+
+```bash
+cd /data/xiawei/project/ComfyUI
+
+/data/xiawei/envs/comfyui-h3/bin/python -u \
+  script_examples/minimax_h3_pdd_batch.py vertical-video-to-horizontal \
+  --server http://127.0.0.1:8187 \
+  --gpu-index 7 \
+  --videos video_1 video_2 \
+  --output-variant sage-anchor-cutfix \
+  2>&1 | tee logs/outpaint_gpu7_sage_anchor_cutfix.log
+```
+
+视频扩展会生成以下调试文件：
+
+```text
+outputs/H3多参考测试案例/竖屏转横屏-FunControlNet-Outpaint/
+└── <video_id>/1344x768/<variant>/
+    ├── debug_source_canvas.mp4
+    ├── debug_mask.mp4
+    ├── debug_masked_source.mp4
+    ├── debug_preprocess.json
+    ├── video_outpaint_*.mp4
+    └── video_outpaint_*_metrics.json
+```
+
+`debug_source_canvas.mp4` 为中央原视频加左右黑色区域；`debug_mask.mp4` 为中央黑色、左右白色；`debug_masked_source.mp4` 为仅保留中央原视频的画布。
+
+## 输出与指标
+
+输出目录按任务、案例、规格和实验版本划分：
+
+```text
+outputs/
+├── H3多参考测试案例/
+│   └── case_qr_08_别墅客厅/
+│       └── 768p_15s/
+│           └── sage/
+│               ├── multi_ref_*.mp4
+│               └── multi_ref_*_metrics.json
+├── 首帧生视频/
+├── 尾帧生视频/
+├── 首尾帧生视频/
+└── H3多参考测试案例/
+    └── 竖屏转横屏-FunControlNet-Outpaint/
+```
+
+每个 `*_metrics.json` 包含：
+
+| 字段 | 内容 |
+|---|---|
+| `execution_seconds` | ComfyUI 正式执行时长，不含模型首次加载、任务排队和热身 |
+| `gpu_peak_memory_mib` | 运行期间采样到的物理 GPU 峰值显存 |
+| `gpu_peak_increment_mib` | 相对任务开始时的显存增量 |
+| `component_profile` | VAE、文本编码、Transformer、Attention、解码、保存等阶段指标 |
+| `attention_backend_calls` | Sage / SDPA 后端调用统计 |
+| `output_file` | 生成视频绝对路径 |
+
+终端结束时会输出任务数、成功数、失败数、单任务推理时长、批次总时长和批次峰值显存。
+
+## PDD 文件转换
+
+原始 PDD 文件可转换为 ComfyUI 键名格式：
+
+```bash
+cd /data/xiawei/project/ComfyUI/custom_nodes/ComfyUI-MiniMax-H3-PDD-Acc
+
+/data/xiawei/envs/comfyui-h3/bin/python \
+  convert_pdd_acc.py \
+  /data/xiawei/models/MiniMax-H3-PDD/MiniMax-H3-Ref2VA-Acc-8Step.safetensors \
+  /data/xiawei/models/MiniMax-H3-PDD/minimax_h3_ref2va_pdd_acc_8step_comfyui.safetensors
+```
+
+## PDD Trunk Bake
+
+```bash
+cd /data/xiawei/project/ComfyUI/custom_nodes/ComfyUI-MiniMax-H3-PDD-Acc
+
+/data/xiawei/envs/comfyui-h3/bin/python bake_pdd_trunk.py --check \
+  --base /data/xiawei/models/MiniMax-H3/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors \
+  --pdd /data/xiawei/models/MiniMax-H3-PDD/MiniMax-H3-Ref2VA-Acc-8Step.safetensors
+
+/data/xiawei/envs/comfyui-h3/bin/python bake_pdd_trunk.py \
+  --base /data/xiawei/models/MiniMax-H3/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors \
+  --pdd /data/xiawei/models/MiniMax-H3-PDD/MiniMax-H3-Ref2VA-Acc-8Step.safetensors \
+  --out /data/xiawei/models/MiniMax-H3/diffusion_models/minimax_h3_ref2va_pddbaked_int8_convrot.safetensors
+```
+
+使用 baked UNET 时，在 `MiniMaxH3PDDAccApply` 中设置 `lora_strength=0.0`。
+
+## 测试
+
+```bash
+cd /data/xiawei/project/ComfyUI/custom_nodes/ComfyUI-MiniMax-H3-PDD-Acc
+
+/data/xiawei/envs/comfyui-h3/bin/python tests/test_pdd_acc.py
+```
+
+完整文件验证：
+
+```bash
+cd /data/xiawei/project/ComfyUI/custom_nodes/ComfyUI-MiniMax-H3-PDD-Acc
+
+PDD_ACC_SLOW=1 /data/xiawei/envs/comfyui-h3/bin/python tests/test_pdd_acc.py
+```
+
+## License
+
+Apache-2.0
+
