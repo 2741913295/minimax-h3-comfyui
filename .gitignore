@@ -1,0 +1,72 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+conda/
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Logs / temporary files
+logs/
+log/
+tmp/
+temp/
+cache/
+*.log
+
+# Models / weights
+models/
+model/
+checkpoints/
+weights/
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.gguf
+*.onnx
+*.engine
+
+# Inputs / outputs / generated results
+input/
+inputs/
+output/
+outputs/
+results/
+result/
+data/
+
+# Generated media
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.wav
+*.mp3
+*.flac
+
+# Metrics / runtime results
+*_metrics.json
+metrics/
+benchmark_results/
+
+# Large archives
+*.zip
+*.tar
+*.tar.gz
+*.7z
+*.rar
