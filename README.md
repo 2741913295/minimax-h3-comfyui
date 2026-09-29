@@ -1,4 +1,4 @@
-# ComfyUI-MiniMax-H3-PDD-Acc
+# MiniMax-H3-ComfyUI
 
 MiniMax H3 的 ComfyUI 本地推理扩展，包含 PDD Acc 加速节点、MiniMax H3 批处理工具，以及多参考、首帧、尾帧、首尾帧和竖屏转横屏视频扩展工作流。
 
